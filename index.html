@@ -42,7 +42,7 @@ button:disabled{opacity:.4}
   height:60px;
   position:relative;
   transform-style:preserve-3d;
-  animation: spin 0.8s linear infinite;
+  animation: spin 0.15s linear infinite;
 }
 
 .face{
@@ -74,6 +74,9 @@ button:disabled{opacity:.4}
 </head>
 
 <body>
+
+<!-- SOUND -->
+<audio id="diceSound" src="https://cdn.pixabay.com/download/audio/2022/03/15/audio_38c86b8b2b.mp3?filename=dice-roll-100889.mp3"></audio>
 
 <!-- LOGIN -->
 <div id="loginPage" class="page">
@@ -140,6 +143,7 @@ firebase.initializeApp({
 const auth=firebase.auth();
 const db=firebase.database();
 const storage=firebase.storage();
+const diceSound=document.getElementById("diceSound");
 
 let uid,user={},pickSide="",bet=0,roomId="",betKey="",timer;
 
@@ -287,6 +291,10 @@ function showResult(r){
   show(gamePage);
   diceArea.innerHTML="";
 
+  // PLAY SOUND
+  diceSound.currentTime=0;
+  diceSound.play();
+
   r.dice.forEach(v=>{
     const cube=document.createElement("div");
     cube.className="dice";
@@ -299,12 +307,20 @@ function showResult(r){
     diceArea.appendChild(cube);
   });
 
+  // STOP setelah 4 detik + GETAR
   setTimeout(()=>{
     document.querySelectorAll(".dice").forEach(d=>{
       d.style.animation="none";
-      d.style.transform="rotateX(20deg) rotateY(30deg)";
+      d.style.transform="rotateX(0deg) rotateY(0deg)";
     });
-  },1000);
+
+    diceSound.pause();
+
+    if(navigator.vibrate){
+      navigator.vibrate([200,100,200]);
+    }
+
+  },4000);
 
   totalText.innerText="Total: "+r.total;
   const win=r.winner===pickSide;
