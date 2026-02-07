@@ -1,0 +1,326 @@
+<!DOCTYPE html>
+<html>
+<head>
+<title>Besar Kecil Online</title>
+
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+
+<!-- FIREBASE -->
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-database-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-storage-compat.js"></script>
+
+<style>
+body{
+  margin:0;
+  background:#0e0e0e;
+  color:white;
+  font-family:Arial;
+  touch-action: manipulation;
+  -webkit-user-select:none;
+  user-select:none;
+}
+
+.page{text-align:center;padding:20px}
+.hidden{display:none}
+button,input{padding:10px;border-radius:8px;border:none;margin:5px}
+button:disabled{opacity:.4}
+.avatar{width:90px;height:90px;border-radius:50%;border:2px solid white}
+
+.diceArea{
+  display:grid;
+  grid-template-columns:repeat(3,60px);
+  gap:12px;
+  justify-content:center;
+  perspective:600px;
+}
+
+/* 3D DICE */
+.dice{
+  width:60px;
+  height:60px;
+  position:relative;
+  transform-style:preserve-3d;
+  animation: spin 0.8s linear infinite;
+}
+
+.face{
+  position:absolute;
+  width:60px;
+  height:60px;
+  background:#2563eb;
+  border-radius:8px;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  font-size:22px;
+  font-weight:bold;
+  backface-visibility:hidden;
+}
+
+.face1{transform:rotateY(0deg) translateZ(30px)}
+.face2{transform:rotateY(90deg) translateZ(30px)}
+.face3{transform:rotateY(180deg) translateZ(30px)}
+.face4{transform:rotateY(-90deg) translateZ(30px)}
+.face5{transform:rotateX(90deg) translateZ(30px)}
+.face6{transform:rotateX(-90deg) translateZ(30px)}
+
+@keyframes spin{
+  from{transform:rotateX(0) rotateY(0)}
+  to{transform:rotateX(360deg) rotateY(360deg)}
+}
+</style>
+</head>
+
+<body>
+
+<!-- LOGIN -->
+<div id="loginPage" class="page">
+  <h2>Login</h2>
+  <input id="usernameInput" placeholder="Username"><br>
+  <input type="file" id="avatarInput"><br><br>
+  <button onclick="login()">Masuk</button>
+</div>
+
+<!-- PROFILE -->
+<div id="profilePage" class="page hidden">
+  <img id="profileAvatar" class="avatar"><br>
+  <h3 id="profileName"></h3>
+  <p>Saldo: <b id="profileSaldo"></b></p>
+  <p>Win: <span id="winCount"></span> | Lose: <span id="loseCount"></span></p>
+  <button onclick="showLobby()">🎮 Quick Match</button>
+</div>
+
+<!-- LOBBY -->
+<div id="lobbyPage" class="page hidden">
+  <input id="betInput" type="number" min="2" placeholder="Taruhan"><br>
+  <button onclick="pick('Besar')">BESAR</button>
+  <button onclick="pick('Kecil')">KECIL</button>
+  <p id="pickInfo"></p>
+  <button id="searchBtn" disabled onclick="searchMatch()">Cari Lawan</button><br>
+  <button onclick="backProfile()">⬅</button>
+</div>
+
+<!-- SEARCH -->
+<div id="searchPage" class="page hidden">
+  <h2>Mencari Lawan...</h2>
+</div>
+
+<!-- MATCH -->
+<div id="matchPage" class="page hidden">
+  <h2>Lawan Ditemukan</h2>
+  <img id="enemyAvatar" class="avatar"><br>
+  <p id="enemyName"></p>
+  <p id="timerText"></p>
+  <button onclick="ready()">READY</button>
+</div>
+
+<!-- GAME -->
+<div id="gamePage" class="page hidden">
+  <h2 id="gameStatus">Rolling Dice...</h2>
+  <div id="diceArea" class="diceArea"></div>
+  <h3 id="totalText"></h3>
+  <h2 id="resultText"></h2>
+  <button onclick="exitGame()">EXIT</button>
+</div>
+
+<script>
+// FIREBASE
+firebase.initializeApp({
+  apiKey: "AIzaSyAj9jRi13-3PT5rDBpQKjYeLFaOUsUJlL4",
+  authDomain: "kbtest-de0b4.firebaseapp.com",
+  databaseURL: "https://kbtest-de0b4-default-rtdb.firebaseio.com",
+  projectId: "kbtest-de0b4",
+  storageBucket: "kbtest-de0b4.appspot.com",
+  messagingSenderId: "782670744816",
+  appId: "1:782670744816:web:11276bf5fa0ed913fe8635"
+});
+
+const auth=firebase.auth();
+const db=firebase.database();
+const storage=firebase.storage();
+
+let uid,user={},pickSide="",bet=0,roomId="",betKey="",timer;
+
+auth.onAuthStateChanged(async u=>{
+  if(u){
+    uid=u.uid;
+    const snap=await db.ref("users/"+uid).once("value");
+    if(snap.exists()){
+      user=snap.val();
+      renderProfile();
+    }
+  }
+});
+
+async function login(){
+  if(!usernameInput.value) return alert("Username!");
+  const cred=await auth.signInAnonymously();
+  uid=cred.user.uid;
+
+  let avatar="https://i.imgur.com/8Km9tLL.png";
+  if(avatarInput.files[0]){
+    const ref=storage.ref("avatars/"+uid);
+    await ref.put(avatarInput.files[0]);
+    avatar=await ref.getDownloadURL();
+  }
+
+  user={name:usernameInput.value,avatar,saldo:100,win:0,lose:0};
+  await db.ref("users/"+uid).set(user);
+  renderProfile();
+}
+
+function show(p){
+  document.querySelectorAll(".page").forEach(x=>x.classList.add("hidden"));
+  p.classList.remove("hidden");
+}
+
+function renderProfile(){
+  show(profilePage);
+  profileAvatar.src=user.avatar;
+  profileName.innerText=user.name;
+  profileSaldo.innerText=user.saldo;
+  winCount.innerText=user.win;
+  loseCount.innerText=user.lose;
+}
+
+function showLobby(){show(lobbyPage)}
+function backProfile(){show(profilePage)}
+
+function pick(p){
+  pickSide=p;
+  pickInfo.innerText="Pick: "+p;
+  searchBtn.disabled=!(betInput.value>=2);
+}
+
+async function searchMatch(){
+  bet=parseInt(betInput.value);
+  betKey="bet_"+bet;
+  show(searchPage);
+
+  const ref=db.ref("match/"+betKey);
+  const snap=await ref.once("value");
+  const rooms=snap.val()||{};
+
+  for(let id in rooms){
+    const r=rooms[id];
+    if(r.status==="waiting" && Object.keys(r.players).length===1){
+      const enemy=Object.values(r.players)[0];
+      if(enemy.pick!==pickSide){
+        roomId=id;
+        await db.ref(`match/${betKey}/${roomId}/players/${uid}`).set({
+          name:user.name,avatar:user.avatar,pick:pickSide,ready:false
+        });
+        await db.ref(`match/${betKey}/${roomId}`).update({status:"ready"});
+        listenRoom();
+        return;
+      }
+    }
+  }
+
+  const newRoom=ref.push();
+  roomId=newRoom.key;
+  await newRoom.set({
+    status:"waiting",
+    players:{
+      [uid]:{name:user.name,avatar:user.avatar,pick:pickSide,ready:false}
+    }
+  });
+  listenRoom();
+}
+
+function listenRoom(){
+  db.ref(`match/${betKey}/${roomId}`).on("value",snap=>{
+    const d=snap.val();
+    if(!d) return;
+
+    const players=Object.entries(d.players||{});
+    if(players.length===2){
+      show(matchPage);
+      const enemy=players.find(p=>p[0]!==uid)[1];
+      enemyName.innerText=enemy.name;
+      enemyAvatar.src=enemy.avatar;
+      startTimer();
+    }
+
+    if(d.rolled && d.result){
+      showResult(d.result);
+    }
+  });
+}
+
+function startTimer(){
+  let t=10;
+  timerText.innerText="READY "+t;
+  timer=setInterval(()=>{
+    t--;timerText.innerText="READY "+t;
+    if(t<=0){clearInterval(timer);autoLose();}
+  },1000);
+}
+
+function ready(){
+  clearInterval(timer);
+  db.ref(`match/${betKey}/${roomId}/players/${uid}/ready`).set(true);
+  db.ref(`match/${betKey}/${roomId}/players`).once("value",s=>{
+    if(Object.values(s.val()).every(p=>p.ready)) rollGame();
+  });
+}
+
+function autoLose(){
+  db.ref(`match/${betKey}/${roomId}/result`).set({winner:"AUTO"});
+}
+
+function rollGame(){
+  let dice=[],total=0;
+  for(let i=0;i<9;i++){
+    const v=1+Math.floor(Math.random()*6);
+    dice.push(v); total+=v;
+  }
+  db.ref(`match/${betKey}/${roomId}`).update({
+    rolled:true,
+    result:{dice,total,winner:total<=32?"Kecil":"Besar"}
+  });
+}
+
+function showResult(r){
+  show(gamePage);
+  diceArea.innerHTML="";
+
+  r.dice.forEach(v=>{
+    const cube=document.createElement("div");
+    cube.className="dice";
+    for(let i=1;i<=6;i++){
+      const f=document.createElement("div");
+      f.className="face face"+i;
+      f.innerText=i===1?v:"";
+      cube.appendChild(f);
+    }
+    diceArea.appendChild(cube);
+  });
+
+  setTimeout(()=>{
+    document.querySelectorAll(".dice").forEach(d=>{
+      d.style.animation="none";
+      d.style.transform="rotateX(20deg) rotateY(30deg)";
+    });
+  },1000);
+
+  totalText.innerText="Total: "+r.total;
+  const win=r.winner===pickSide;
+  resultText.innerText=win?"MENANG 🎉":"KALAH 😢";
+
+  user.saldo+=win?bet:-bet;
+  user.win+=win?1:0;
+  user.lose+=win?0:1;
+  db.ref("users/"+uid).update(user);
+}
+
+function exitGame(){
+  db.ref(`match/${betKey}/${roomId}`).off();
+  roomId=""; betKey=""; pickSide="";
+  renderProfile();
+}
+</script>
+</body>
+</html>
